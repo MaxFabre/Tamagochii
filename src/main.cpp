@@ -1,7 +1,13 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include <SD.h>
+#include <TJpg_Decoder.h>
 
 #define TFT_BL 27
+
+#define BUZZER 14
+#define SD_CS 4
+#define BACKGROUND_PATH "/backgrounds/2.jpg"
 
 #define BTN_LEFT 16
 #define BTN_MIDDLE 17
@@ -21,10 +27,44 @@ constexpr uint16_t TOUCH_THRESHOLD = 20;
 constexpr uint8_t RELEASE_READS = 8;
 
 bool circleIsRed = false;
+bool leftButtonWasPressed = false;
 bool middleButtonWasPressed = false;
+bool rightButtonWasPressed = false;
 bool touchWasPressed = false;
 uint8_t missedTouchReads = RELEASE_READS;
 uint32_t lastTouchDiagnostic = 0;
+
+bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+  if (y >= tft.height()) {
+    return false;
+  }
+  tft.pushImage(x, y, w, h, bitmap);
+  return true;
+}
+
+bool loadBackgroundFromSd() {
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD init failed");
+    return false;
+  }
+
+  TJpgDec.setJpgScale(1);
+  TJpgDec.setSwapBytes(true);
+  TJpgDec.setCallback(tftOutput);
+
+  const JRESULT decoded = TJpgDec.drawSdJpg(0, 0, BACKGROUND_PATH);
+  if (decoded != JDR_OK) {
+    Serial.print("JPEG decode failed: ");
+    Serial.println(static_cast<int>(decoded));
+    return false;
+  }
+
+  return true;
+}
+
+void playButtonNote(uint16_t frequency, uint32_t duration = 200) {
+  tone(BUZZER, frequency, duration);
+}
 
 void drawCircle(uint16_t color) {
   tft.fillCircle(CIRCLE_X, CIRCLE_Y, CIRCLE_RADIUS, color);
@@ -38,6 +78,7 @@ void toggleCircle() {
 void setup() {
   Serial.begin(115200);
 
+  pinMode(BUZZER, OUTPUT);
   pinMode(BTN_LEFT, INPUT_PULLUP);
   pinMode(BTN_MIDDLE, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT_PULLUP);
@@ -47,8 +88,15 @@ void setup() {
   tft.init();
   tft.setRotation(0);
   tft.setTouch(touchCalibration);
-  tft.fillScreen(TFT_BLACK);
+
+  if (!loadBackgroundFromSd()) {
+    tft.fillScreen(TFT_BLACK);
+  }
+
   drawCircle(TFT_BLUE);
+
+  playButtonNote(262, 180); //Do
+  playButtonNote(392, 180);  // Sol
 }
 
 void loop() {
@@ -56,12 +104,17 @@ void loop() {
   uint16_t touchY = 0;
   bool isTouchingCircle = false;
 
-  if (digitalRead(BTN_LEFT) == LOW) {
+  const bool leftButtonPressed = digitalRead(BTN_LEFT) == LOW;
+  const bool rightButtonPressed = digitalRead(BTN_RIGHT) == LOW;
+
+  if (leftButtonPressed && !leftButtonWasPressed) {
     Serial.println("Left button pressed");
   }
-  if (digitalRead(BTN_RIGHT) == LOW) {
+  if (rightButtonPressed && !rightButtonWasPressed) {
     Serial.println("Right button pressed");
   }
+  leftButtonWasPressed = leftButtonPressed;
+  rightButtonWasPressed = rightButtonPressed;
 
   const bool middleButtonPressed = digitalRead(BTN_MIDDLE) == LOW;
   if (middleButtonPressed && !middleButtonWasPressed) {
